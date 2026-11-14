@@ -44,8 +44,8 @@ run_all("BEFORE")
 def _wrap_2d_function_fixed(inputs, compute_op, dim=-1, name=None):
   def _swap_axis(input_tensor, dim_index, last_index, name=None):
     perm = math_ops.range(last_index + 1)
-    perm = array_ops.where(math_ops.equal(perm, dim_index), last_index,
-                           array_ops.where(math_ops.equal(perm, last_index), dim_index, perm))
+    perm = array_ops.where_v2(math_ops.equal(perm, dim_index), last_index,
+                           array_ops.where_v2(math_ops.equal(perm, last_index), dim_index, perm))
     return array_ops.transpose(input_tensor, perm, name=name)
 
   inputs = ops.convert_to_tensor(inputs)
@@ -63,7 +63,7 @@ def _wrap_2d_function_fixed(inputs, compute_op, dim=-1, name=None):
     dim_axis = int(dim_val) % ndims
   else:
     dim = math_ops.cast(dim, input_rank.dtype)
-    dim_axis = array_ops.where(math_ops.less(dim, 0), dim + input_rank, dim)
+    dim_axis = array_ops.where_v2(math_ops.less(dim, 0), dim + input_rank, dim)
   last = math_ops.subtract(input_rank, 1)
   inputs = _swap_axis(inputs, dim_axis, last)
   def fix_output(output):
