@@ -1,0 +1,75 @@
+name: softmax-dynamic-rank-axis
+on:
+  push:
+    branches: ['ci/softmax-dynamic-rank-axis']
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [baseline, fixed]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 3
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install tf-nightly
+        run: |
+          pip install -q tf-nightly
+          pip list 2>/dev/null | grep -iE "^(tf.nightly|numpy|keras)"
+      - name: Select nn_ops.py and tests
+        run: |
+          SITE=$(cd /tmp && python -c "import os, tensorflow.python.ops as m; print(os.path.dirname(m.__file__))")
+          mkdir -p /tmp/run
+          if [ "${{ matrix.variant }}" = baseline ]; then REV=HEAD~2; else REV=HEAD~1; fi
+          git log -1 --format='%h %s' $REV
+          git show $REV:tensorflow/python/ops/nn_ops.py > "$SITE/nn_ops.py"
+          # The new tests are always the ones from the fix commit.
+          git show HEAD~1:tensorflow/python/kernel_tests/nn_ops/softmax_op_test.py > /tmp/run/softmax_op_test.py
+          git show HEAD~1:tensorflow/python/ops/nn_test.py > /tmp/run/nn_test.py
+          cp .github/ci_softmax/*.py /tmp/run/
+          sha256sum "$SITE/nn_ops.py"
+      - name: softmax_op_test.py
+        working-directory: /tmp/run
+        run: TF_CPP_MIN_LOG_LEVEL=2 python softmax_op_test.py 2>&1 | grep -E "^(FAIL|ERROR|Ran |OK|FAILED)|Error:" || true
+      - name: nn_test.py
+        working-directory: /tmp/run
+        run: TF_CPP_MIN_LOG_LEVEL=2 python nn_test.py 2>&1 | grep -E "^(FAIL|ERROR|Ran |OK|FAILED)|Error:" | head -80 || true
+      - name: nn_test.py IsotonicTest only
+        working-directory: /tmp/run
+        run: TF_CPP_MIN_LOG_LEVEL=2 python nn_test.py IsotonicTest 2>&1 | grep -E "^(FAIL|ERROR|Ran |OK|FAILED)|Error:" || true
+      - name: sanity
+        working-directory: /tmp/run
+        run: TF_CPP_MIN_LOG_LEVEL=2 python sanity.py 2>&1 | grep -v -E "^(WARNING|I0000|W0000)" || true
+      - name: static-path graph
+        working-directory: /tmp/run
+        run: TF_CPP_MIN_LOG_LEVEL=2 python graph_ops.py 2>&1 | grep "^axis" | tee graph.txt; sha256sum graph.txt
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 3
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install -q pylint==2.13.9 "numpy<2.0.0" wheel
+      - name: pylint as in pylint-presubmit.yml, on the changed files
+        run: |
+          pylint --version
+          for f in $(git diff --name-only HEAD~2 HEAD~1); do
+            lines=$(git diff -U0 HEAD~2 HEAD~1 -- $f | grep -oE '^@@ [^+]*\+[0-9]+(,[0-9]+)?' | sed -E 's/.*\+//' | awk -F, '{n=($2=="")?1:$2; for(i=0;i<n;i++) print $1+i}')
+            echo "== $f (fixed)"
+            git show HEAD~1:$f > /tmp/fixed.py
+            pylint --rcfile=tensorflow/tools/ci_build/pylintrc /tmp/fixed.py > /tmp/fixed.txt 2>&1; echo "rc=$?"
+            grep -E '^/tmp/fixed.py:[0-9]+' /tmp/fixed.txt | sed 's#/tmp/fixed.py#F#' > /tmp/fixed_msgs.txt || true
+            echo "messages in whole file: $(wc -l < /tmp/fixed_msgs.txt)"; tail -3 /tmp/fixed.txt
+            echo "messages on changed lines:"
+            for l in $lines; do grep -E "^F:$l:" /tmp/fixed_msgs.txt; done | sort -u
+            echo "== $f (baseline)"
+            git show HEAD~2:$f > /tmp/base.py
+            pylint --rcfile=tensorflow/tools/ci_build/pylintrc /tmp/base.py 2>&1 | grep -cE '^/tmp/base.py:[0-9]+' || true
+          done
