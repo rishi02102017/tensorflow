@@ -8,7 +8,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pkg: [tensorflow-cpu, tf-nightly-cpu]
+        pkg: [tensorflow-cpu, tf-nightly]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: |
-          pip install -q ${{ matrix.pkg }} || pip install -q $(echo ${{ matrix.pkg }} | sed 's/-cpu//')
+          pip install -q ${{ matrix.pkg }}
           pip list 2>/dev/null | grep -i -E "^(tensorflow|tf-nightly|tf_nightly|numpy)"
       - run: |
           for f in probe*.py; do echo "=== $f"; TF_CPP_MIN_LOG_LEVEL=3 python -u $f 2>&1 | grep -v -E "^(WARNING|I0000|E0000|W0000)"; done
